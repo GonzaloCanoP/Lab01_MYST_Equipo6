@@ -1,0 +1,16 @@
+# Dependencias del Lab01. Versiones fijadas: sin '==' la reproducibilidad
+# es una promesa vacia.
+#
+#     python3 -m venv .venv
+#     source .venv/bin/activate
+#     pip install -r requirements.txt
+#
+# Este archivo es de P4. Si P1, P2 o P3 necesitan una dependencia nueva,
+# se le avisa a P4 en vez de editarlo desde otra rama.
+
+numpy==2.5.2
+scipy==1.18.1
+pandas==3.0.5
+matplotlib==3.11.1
+pytest==9.1.1
+jupyter==1.1.1
