@@ -1,0 +1,25 @@
+# Entornos virtuales. Cada quien crea el suyo con requirements.txt.
+.venv/
+venv/
+env/
+
+# Archivos generados por Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Checkpoints de Jupyter
+.ipynb_checkpoints/
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+.DS_Store
+
+# NO se ignora docs/instrucciones/: es material de trabajo del equipo y tiene
+# que viajar con el repo. Varias plantillas de Python ignoran carpetas de
+# documentacion; si se cuela, Milca clona el repo sin ninguna instruccion.
+# Verificar con: git check-ignore docs/instrucciones/README.md  (no debe salir nada)
+
+# docs/figuras/ queda versionada por ahora. Depende del punto abierto O5:
+# si se decide regenerarla siempre, se agrega aqui y se documenta en el README.
