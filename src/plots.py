@@ -220,44 +220,95 @@ def fig_histograma_montecarlo(resultados_mc):
     return fig
 
 
-def fig_sensibilidad(df_sensibilidad):
-    """Spread optimo contra pi_i, con los puntos de `analisis_sensibilidad`.
+def fig_sensibilidad(df_sensibilidad, df_teorico=None):
+    """Spread optimo contra pi_i, contra la curva teorica de la CPO.
 
-    `df_sensibilidad` es el DataFrame de `src.model.analisis_sensibilidad`,
-    con columnas `['pi_i', 'bid', 'ask', 'spread', 'utilidad_esperada',
+    `df_sensibilidad` es el DataFrame de `src.model.analisis_sensibilidad`, con
+    columnas `['pi_i', 'bid', 'ask', 'spread', 'utilidad_esperada',
     'convergio']`. Aqui solo se grafica `spread` contra `pi_i`, ya calculados
     alla.
 
-    Marcadores visibles y, si se conecta, linea PUNTEADA en vez de solida: con
-    solo tres valores de pi_i (tipicamente 0.1, 0.4, 0.7) una linea solida
-    sugiere que el spread optimo interpola linealmente entre esos puntos, y
-    eso no esta demostrado -- de hecho no lo es, porque el spread depende de
-    una integral no lineal de la Erlang. La linea punteada es una guia visual
-    para el ojo, no una afirmacion de forma funcional.
+    `df_teorico` es opcional y es lo que produce
+    `src.model.curva_teorica_spread`: columnas `['pi_i', 'medio_spread_ask',
+    'medio_spread_bid', 'spread']`. Si se pasa, se traza como curva continua
+    debajo de los puntos numericos. El argumento tiene default `None` para no
+    romper a quien llame `fig_sensibilidad(df)` con un solo argumento, que es
+    como estaba congelada la firma original.
 
-    No se traza ninguna curva teorica encima: la prediccion teorica de la
-    Sesion 04 (punto abierto O3) todavia no esta confirmada, y la regla del
-    proyecto es no inventar una formula solo para tener algo que graficar.
+    Por que ahora si se traza la curva teorica, cuando antes no. La version
+    anterior de esta figura no la dibujaba porque la prediccion teorica de la
+    Sesion 04 era un punto abierto y la regla del proyecto es no inventar una
+    formula para tener algo que graficar. Ese punto ya esta cerrado: la
+    prediccion es la condicion de primer orden del propio modelo,
+
+        pi_L*(ALPHA - 2*BETA*a) + pi_I*(1 - F(A)) = 0
+
+    y `curva_teorica_spread` la resuelve con `brentq`, sin llamar al
+    optimizador. Que los tres puntos de `minimize` caigan sobre esa curva es la
+    comparacion que pide el enunciado (3.5), y vale porque son dos metodos
+    numericos independientes que no comparten fuente de error.
+
+    La linea horizontal en `ALPHA/BETA = 6.25` es el spread del monopolista,
+    o sea el optimo cuando pi_i = 0. No depende de la informacion asimetrica
+    en absoluto. El area sombreada entre esa linea y la curva teorica es la
+    prima de seleccion adversa: la parte del spread que existe unicamente
+    porque hay traders informados. Esa separacion es el punto que la figura
+    sostiene, y es lo que no se ve en una grafica de spread contra pi_i a secas.
+
+    Los puntos numericos se dibujan con marcadores y SIN linea que los una:
+    antes se conectaban con una linea punteada como guia visual, pero ahora la
+    curva teorica ocupa ese lugar y hace el trabajo mejor, porque si es una
+    afirmacion de forma funcional y esta justificada.
 
     Los casos con `convergio=False` se marcan aparte con una 'x' negra en vez
-    de dejarlos mezclados con los puntos validos: un optimo que no convergio
-    no es un dato mas, es un caso degenerado que hay que poder distinguir a
-    simple vista (CLAUDE.md, regla 10 -- los NaN y los casos degenerados se
-    reportan, no se maquillan).
+    de dejarlos mezclados con los puntos validos: un optimo que no convergio no
+    es un dato mas, es un caso degenerado que hay que poder distinguir a simple
+    vista (CLAUDE.md, regla 10 -- los NaN y los casos degenerados se reportan,
+    no se maquillan).
     """
     convergio = df_sensibilidad["convergio"].astype(bool)
+    spread_monopolista = ALPHA / BETA
 
     fig, ax = plt.subplots(figsize=(10, 6))
+
+    if df_teorico is not None:
+        ax.fill_between(
+            df_teorico["pi_i"],
+            spread_monopolista,
+            df_teorico["spread"],
+            color=COLORES["optimo"],
+            alpha=0.12,
+            label="Prima de selección adversa",
+        )
+        ax.plot(
+            df_teorico["pi_i"],
+            df_teorico["spread"],
+            linestyle="-",
+            linewidth=2,
+            color=COLORES["optimo"],
+            label="Predicción teórica (CPO, resuelta con brentq)",
+            zorder=2,
+        )
+
+    ax.axhline(
+        spread_monopolista,
+        color="black",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"Spread del monopolista, sin informados = {spread_monopolista:.2f}",
+    )
 
     ax.plot(
         df_sensibilidad.loc[convergio, "pi_i"],
         df_sensibilidad.loc[convergio, "spread"],
         marker="o",
-        markersize=10,
-        linestyle=":",
-        linewidth=1.5,
-        color=COLORES["optimo"],
-        label="Spread óptimo",
+        markersize=11,
+        linestyle="none",
+        markerfacecolor="white",
+        markeredgecolor=COLORES["estrecho"],
+        markeredgewidth=2.5,
+        label="Óptimo numérico (scipy.optimize.minimize)",
+        zorder=3,
     )
 
     if (~convergio).any():
@@ -269,6 +320,7 @@ def fig_sensibilidad(df_sensibilidad):
             linewidths=2.5,
             color="black",
             label="No convergió",
+            zorder=4,
         )
 
     ax.set_title(
@@ -279,7 +331,7 @@ def fig_sensibilidad(df_sensibilidad):
     ax.set_ylabel("Spread óptimo, ask − bid (unidades monetarias)", fontsize=11)
     ax.tick_params(labelsize=11)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=11)
+    ax.legend(fontsize=10, loc="upper left")
 
     fig.tight_layout()
     return fig

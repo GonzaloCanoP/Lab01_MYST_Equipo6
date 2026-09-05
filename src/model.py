@@ -381,3 +381,91 @@ def prediccion_teorica_spread(pi_i=PI_I):
         "spread_teorico": 2 * medio_spread_monopolista + float(prima_ask) + float(prima_bid),
         "spread_numerico": resultado["spread"],
     }
+
+
+def curva_teorica_spread(valores_pi=np.linspace(0.0, 0.9, 46)):
+    """Resuelve la CPO para una malla de pi_i y devuelve la curva teorica.
+
+    Es la contraparte continua de `prediccion_teorica_spread`, y la diferencia
+    entre las dos es importante:
+
+    - `prediccion_teorica_spread` EVALUA la identidad en el optimo que ya
+      encontro L-BFGS-B. Verifica que ese punto sea estacionario.
+    - Esta funcion RESUELVE la CPO por su cuenta, con `scipy.optimize.brentq`,
+      sin llamar a `optimizar_cotizaciones` ni una vez.
+
+    Por eso la curva que sale de aqui es una verificacion independiente y no un
+    espejo: `brentq` es un metodo de biseccion sobre el cambio de signo de una
+    ecuacion escalar, sin gradientes ni aproximaciones por diferencias finitas,
+    o sea que no comparte ninguna fuente de error con L-BFGS-B. Si los puntos
+    del analisis de sensibilidad caen sobre esta curva, es porque dos metodos
+    numericos distintos coinciden, no porque uno se haya copiado del otro.
+
+    Las ecuaciones, con a = A - S0 y b = S0 - B:
+
+        pi_L*(2*BETA*a - ALPHA) - pi_I*(1 - F(S0 + a)) = 0
+        pi_L*(2*BETA*b - ALPHA) - pi_I*F(S0 - b)       = 0
+
+    El intervalo de busqueda es [ALPHA/(2*BETA), ALPHA/BETA] = [3.125, 6.25],
+    y los dos extremos no son arbitrarios:
+
+    - En el limite inferior, el termino de liquidez se anula (es el vertice de
+      la parabola de ingreso) y queda -pi_I*(1-F) <= 0. Es el optimo del
+      monopolista, y la cota inferior del optimo con informados.
+    - En el limite superior, ALPHA - BETA*s llega a cero: de ahi en adelante
+      `prob_ejecucion` esta truncada y su derivada ya no es ALPHA - 2*BETA*s,
+      asi que la CPO deja de describir el problema. La funcion es positiva ahi,
+      de modo que la raiz siempre queda dentro del intervalo y la formula solo
+      se usa donde es valida.
+
+    Con pi_i = 0 no hace falta resolver nada: la CPO se reduce al vertice y la
+    respuesta es ALPHA/(2*BETA) exacta de los dos lados. Se devuelve directo en
+    vez de dejarselo a `brentq`, que en ese caso tiene la raiz justo en el
+    extremo del intervalo.
+
+    Devuelve un DataFrame con columnas
+    `['pi_i', 'medio_spread_ask', 'medio_spread_bid', 'spread']`.
+    """
+    dist = distribucion_valor()
+    a_monopolista = ALPHA / (2 * BETA)
+    a_maximo = ALPHA / BETA
+
+    def _cpo_ask(a, pi_i):
+        return (1.0 - pi_i) * (2 * BETA * a - ALPHA) - pi_i * dist.sf(S0 + a)
+
+    def _cpo_bid(b, pi_i):
+        return (1.0 - pi_i) * (2 * BETA * b - ALPHA) - pi_i * dist.cdf(S0 - b)
+
+    def _resolver(cpo, pi_i):
+        if pi_i == 0.0:
+            return a_monopolista
+        inferior, superior = cpo(a_monopolista, pi_i), cpo(a_maximo, pi_i)
+        if inferior * superior > 0:
+            # Sin cambio de signo no hay raiz que buscar en el intervalo donde
+            # la CPO es valida. Se reporta en vez de devolver un numero
+            # inventado (CLAUDE.md, regla 10).
+            raise ValueError(
+                f"La CPO no cambia de signo en [{a_monopolista}, {a_maximo}] "
+                f"para pi_i = {pi_i}: f({a_monopolista}) = {inferior:.4e}, "
+                f"f({a_maximo}) = {superior:.4e}. El optimo interior no existe "
+                f"o queda fuera del rango donde prob_ejecucion es positiva."
+            )
+        return optimize.brentq(cpo, a_monopolista, a_maximo, args=(pi_i,), xtol=1e-12)
+
+    filas = []
+    for pi_i in np.asarray(valores_pi, dtype=float):
+        if pi_i >= 1.0:
+            raise ValueError(
+                "La CPO no esta definida con pi_i = 1: sin traders de liquidez "
+                "no hay ingreso que compensar y el problema pierde su interior."
+            )
+        a = _resolver(_cpo_ask, float(pi_i))
+        b = _resolver(_cpo_bid, float(pi_i))
+        filas.append({
+            "pi_i": float(pi_i),
+            "medio_spread_ask": a,
+            "medio_spread_bid": b,
+            "spread": a + b,
+        })
+
+    return pd.DataFrame(filas)

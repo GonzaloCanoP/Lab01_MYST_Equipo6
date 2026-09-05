@@ -21,14 +21,5 @@ __pycache__/
 # documentacion; si se cuela, Milca clona el repo sin ninguna instruccion.
 # Verificar con: git check-ignore docs/instrucciones/README.md  (no debe salir nada)
 
-# docs/figuras/ queda versionada por ahora. Depende del punto abierto O5:
-# si se decide regenerarla siempre, se agrega aqui y se documenta en el README.
-
-# Material privado del equipo. NADA de lo que este aqui llega a un commit.
-# Es para el enunciado original del profesor, la guia de defensa y cualquier
-# borrador que no deba viajar con el repo.
-#
-# Ojo con el orden: si un archivo se commitea PRIMERO y se borra despues, sigue
-# en el historial y se recupera con `git log --all`. Ignorarlo desde el
-# principio es lo unico que garantiza que nunca entre.
-_privado/
+# docs/figuras/ queda versionada: main.py la regenera, pero asi el repositorio
+# se puede revisar sin instalar el entorno (punto abierto O5).

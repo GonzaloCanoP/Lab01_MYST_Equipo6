@@ -35,6 +35,7 @@ import matplotlib
 # ejecuta por SSH o dentro de un contenedor.
 matplotlib.use("Agg")
 
+import numpy as np
 import pandas as pd
 
 from src.model import (
@@ -46,6 +47,7 @@ from src.model import (
     S0,
     SEED,
     analisis_sensibilidad,
+    curva_teorica_spread,
     distribucion_valor,
     optimizar_cotizaciones,
     perdida_informados,
@@ -75,6 +77,7 @@ N_TRADES = 10_000        # trades por regimen en la simulacion de 3.3
 N_CORRIDAS_MC = 1_000    # corridas de Monte Carlo por regimen
 N_TRADES_MC = 1_000      # trades por corrida de Monte Carlo
 N_TRADES_VERIFICACION = 300_000  # trades para contrastar simulacion vs modelo
+N_SEMILLAS_DERIVA = 200          # semillas para separar la deriva de inventario del ruido
 
 DIRECTORIO_FIGURAS = pathlib.Path("docs/figuras")
 
@@ -215,6 +218,41 @@ def main():
         print(f"  {nombre:<10}  {de_liquidez:>13.2f}  {de_informados:>15.2f}  "
               f"{n_informados:>18,}")
     print()
+    print("  Desglose del INVENTARIO por tipo de trader, y de donde sale la deriva:")
+    print()
+    print(f"  {'regimen':<10}  {'inv. final':>10}  {'de inform.':>10}  {'de liquid.':>10}  "
+          f"{'P(P>A)':>8}  {'P(P<B)':>8}  {'razon':>6}  {'deriva teor.':>12}")
+    dist = distribucion_valor()
+    for nombre, df in simulaciones.items():
+        bid, ask = regimenes[nombre]
+        de_informados = int(df.loc[df["tipo_trader"] == "informado", "delta_inventario"].sum())
+        de_liquidez = int(df.loc[df["tipo_trader"] == "liquidez", "delta_inventario"].sum())
+        cola_ask, cola_bid = float(dist.sf(ask)), float(dist.cdf(bid))
+        deriva = -N_TRADES * PI_I * (cola_ask - cola_bid)
+        print(f"  {nombre:<10}  {df['inventario'].iloc[-1]:>10,}  {de_informados:>10,}  "
+              f"{de_liquidez:>10,}  {cola_ask:>8.4f}  {cola_bid:>8.4f}  "
+              f"{cola_ask / cola_bid:>6.3f}  {deriva:>12.1f}")
+    print()
+    print("  El aporte de liquidez es IDENTICO en los tres: comparten semilla, la")
+    print("  direccion se sortea 50/50 y con ejecucion forzada todos cruzan, asi que")
+    print("  es literalmente la misma caminata aleatoria. Todo el desbalance viene de")
+    print("  informados, y su deriva esperada es -n*pi_i*[P(P>A) - P(P<B)]: cuanto mas")
+    print("  lejos se cotiza, mas domina la cola derecha de la Erlang, que es la pesada.")
+    print()
+    print(f"  Verificacion sobre {N_SEMILLAS_DERIVA} semillas independientes, para separar la deriva del ruido:")
+    print()
+    print(f"  {'regimen':<10}  {'inv. final promedio':>20}  {'error estandar':>15}  {'deriva teor.':>12}")
+    for nombre, (bid, ask) in regimenes.items():
+        finales = np.array([
+            simular_trades(bid, ask, n_trades=N_TRADES, seed=SEED + i)["inventario"].iloc[-1]
+            for i in range(N_SEMILLAS_DERIVA)
+        ])
+        cola_ask, cola_bid = float(dist.sf(ask)), float(dist.cdf(bid))
+        deriva = -N_TRADES * PI_I * (cola_ask - cola_bid)
+        error_estandar = finales.std(ddof=1) / np.sqrt(N_SEMILLAS_DERIVA)
+        print(f"  {nombre:<10}  {finales.mean():>20.1f}  {error_estandar:>15.1f}  {deriva:>12.1f}")
+
+    print()
     print("  El P&L frente a informados es negativo en los tres regimenes, siempre.")
     print("  Un informado solo cruza cuando sabe que el precio esta mal, asi que")
     print("  nunca le deja ganancia al formador: esa columna es el costo de la")
@@ -301,6 +339,18 @@ def main():
               f"{pred['monopolista']:>12.4f}  {pred['prima_ask']:>9.4f}  "
               f"{pred['teorico_ask']:>11.4f}  {pred['residuo_ask']:>10.2e}")
     print()
+    print()
+    print("  Verificacion independiente: la CPO tambien se resuelve por su cuenta con")
+    print("  scipy.optimize.brentq, sin llamar al optimizador. brentq biseca el cambio")
+    print("  de signo de una ecuacion escalar y no usa gradientes, asi que no comparte")
+    print("  ninguna fuente de error con L-BFGS-B. Los dos metodos coinciden:")
+    print()
+    print(f"  {'pi_i':>5}  {'spread minimize':>16}  {'spread brentq':>14}  {'diferencia':>11}")
+    curva_en_los_puntos = curva_teorica_spread(df_sensibilidad["pi_i"].to_numpy())
+    for (_, fila), (_, teo) in zip(df_sensibilidad.iterrows(), curva_en_los_puntos.iterrows()):
+        print(f"  {fila['pi_i']:>5.1f}  {fila['spread']:>16.6f}  {teo['spread']:>14.6f}  "
+              f"{abs(fila['spread'] - teo['spread']):>11.2e}")
+    print()
     print("  El residuo es de orden 1e-6 en los cuatro casos: el optimo numerico y")
     print("  la prediccion teorica son el mismo punto. La prima de seleccion adversa")
     print("  pasa de 0.00 con pi_i = 0 a 0.98 con pi_i = 0.7, o sea que a esa altura")
@@ -319,12 +369,14 @@ def main():
     # ningun paso manual previo. `exist_ok=True` lo hace idempotente.
     DIRECTORIO_FIGURAS.mkdir(parents=True, exist_ok=True)
 
+    curva_teorica = curva_teorica_spread()
+
     figuras = {
         "fig1_prob_ejecucion": fig_prob_ejecucion(),
         "fig2_pnl_acumulado": fig_pnl_acumulado(simulaciones),
         "fig3_inventario": fig_inventario(simulaciones),
         "fig4_histograma_montecarlo": fig_histograma_montecarlo(resultados_mc),
-        "fig5_sensibilidad": fig_sensibilidad(df_sensibilidad),
+        "fig5_sensibilidad": fig_sensibilidad(df_sensibilidad, curva_teorica),
     }
 
     for nombre, fig in figuras.items():

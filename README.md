@@ -53,14 +53,31 @@ Las pruebas se corren aparte:
 pytest -v
 ```
 
-**14 pruebas, todas pasan en ~1.7 s.** Las tres obligatorias del enunciado (3.6) son
+**16 pruebas, todas pasan en ~1.7 s.** Las tres obligatorias del enunciado (3.6) son
 `test_prob_ejecucion_nunca_es_negativa`, `test_perdida_informados_es_decreciente_en_el_ask` y
-`test_spread_optimo_con_pi_i_cero_es_el_del_monopolista`; las once restantes verifican la
+`test_spread_optimo_con_pi_i_cero_es_el_del_monopolista`; las trece restantes verifican la
 contabilidad del P&L, la reproducibilidad, la condición de optimalidad y la equivalencia entre el
 modelo y la simulación.
 
 El análisis narrado, con las figuras inline, está en `notebooks/analysis.ipynb`. Ese notebook
 **solo importa y grafica**: no contiene ni una fórmula del modelo ni del simulador.
+
+## La presentación
+
+La exposición vive en `notebooks/presentacion.ipynb`, y se exporta a diapositivas con:
+
+```bash
+jupyter nbconvert --to slides --no-input notebooks/presentacion.ipynb
+```
+
+`--no-input` oculta el código: las diapositivas muestran solo el texto y los resultados, nunca
+capturas de código. `docs/presentacion.pdf` es esa misma exportación impresa, y **es la versión
+que conviene usar en el salón**, porque el HTML de reveal.js carga sus librerías de un CDN y no
+abre sin internet. El PDF es autocontenido.
+
+Doce diapositivas de contenido, más portada y cierre. Como el notebook importa de `src/`, los
+números de la presentación son los mismos que produce `python main.py`: no hay una sola cifra
+transcrita a mano.
 
 ## Semilla aleatoria
 
@@ -282,6 +299,25 @@ todo el efecto de la información asimétrica. Contrastando contra el óptimo nu
 | 0.4 | 3.5277 | 3.1250 | 0.4027 | 3.5277 | 1.0e−06 |
 | 0.7 | 4.1008 | 3.1250 | 0.9758 | 4.1008 | 1.7e−06 |
 
+**Y hay una segunda verificación, esta vez independiente de verdad.** La tabla de arriba evalúa la
+identidad *en* el óptimo que ya encontró `minimize`, así que comparte con él cualquier error. Para
+cerrar esa puerta, `curva_teorica_spread()` **resuelve** la CPO por su cuenta con
+`scipy.optimize.brentq` — una bisección sobre el cambio de signo de una ecuación escalar, sin
+gradientes y sin llamar al optimizador ni una vez:
+
+| `π_I` | Spread con `minimize` | Spread con `brentq` | Diferencia |
+|---:|---:|---:|---:|
+| 0.1 | 6.397690 | 6.397691 | 8.2e−07 |
+| 0.4 | 6.975986 | 6.975988 | 1.5e−06 |
+| 0.7 | 7.993863 | 7.993865 | 2.0e−06 |
+
+L-BFGS-B aproxima el gradiente por diferencias finitas sobre una `Π` que `quad` contamina con
+ruido de orden 1e−10; `brentq` no hace ninguna de las dos cosas. **Que dos métodos sin fuente de
+error común coincidan en 1e−6 convierte "el resultado coincide con la teoría" en una afirmación
+verificable**, y no en una coincidencia de implementación. La Figura 5 dibuja exactamente eso: los
+tres puntos de `minimize` cayendo sobre la curva de `brentq`, con el área entre la curva y el piso
+del monopolista sombreada como prima de selección adversa.
+
 El óptimo numérico y la predicción teórica **son el mismo punto**. Y la descomposición dice algo
 que la tabla de spreads sola no dice: con `π_I = 0.4` la prima de selección adversa es el **11.4%**
 del medio spread; con `π_I = 0.7` sube al **23.8%**. Casi un cuarto de lo que cobra el formador
@@ -384,7 +420,9 @@ informados; los traders de liquidez sí ejecutan siempre bajo `forzar_ejecucion=
 
 **O3 — La predicción teórica de la Sesión 04. RESUELTO.** Es la condición de primer orden
 `π_L·(α − 2β·a) + π_I·(1 − F(A)) = 0`, la misma CPO de la sesión de Copeland-Galai del curso.
-Está implementada, comparada numéricamente y probada; ver la pregunta 4.
+Está implementada en `prediccion_teorica_spread()` (la evalúa en el óptimo) y en
+`curva_teorica_spread()` (la resuelve con `brentq`, sin usar el optimizador), verificada por esos
+dos caminos independientes y probada; ver la pregunta 4.
 
 **O4 — Cuántas figuras.** El código genera **cinco**: las cuatro de la sección 3.4 más la de
 spread óptimo contra `π_I` que pide la 3.5. Cuántas van a las diapositivas es decisión de la
@@ -416,12 +454,13 @@ Lab01_MYST_Equipo6/
 │   ├── simulation.py       # simulador de trades y Monte Carlo
 │   └── plots.py            # las cinco figuras (devuelven Figure, no guardan)
 ├── tests/
-│   ├── test_model.py       # 14 pruebas de pytest
+│   ├── test_model.py       # 16 pruebas de pytest
 │   └── pruebasp1.py        # script de verificación manual de P1 (no es entregable)
 ├── notebooks/
-│   └── analysis.ipynb      # solo análisis y figuras, sin lógica
+│   ├── analysis.ipynb      # solo análisis y figuras, sin lógica
+│   └── presentacion.ipynb  # la exposición: 12 diapositivas + portada y cierre
 └── docs/
-    ├── presentacion.pdf
+    ├── presentacion.pdf    # exportada del notebook, autocontenida
     ├── figuras/            # salida de main.py, versionada
     └── instrucciones/      # instrucciones por parte, uso interno del equipo
 ```

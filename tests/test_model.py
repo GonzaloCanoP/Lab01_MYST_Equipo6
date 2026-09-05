@@ -45,6 +45,7 @@ from src.model import (
     S0,
     SEED,
     analisis_sensibilidad,
+    curva_teorica_spread,
     distribucion_valor,
     ganancia_liquidez,
     optimizar_cotizaciones,
@@ -489,3 +490,50 @@ def test_prediccion_teorica_falla_fuerte_si_no_hay_liquidez():
     """
     with pytest.raises(ValueError, match="pi_i = 1"):
         prediccion_teorica_spread(pi_i=1.0)
+
+
+def test_curva_teorica_resuelta_con_brentq_coincide_con_el_optimizador():
+    """Dos metodos numericos independientes dan el mismo spread optimo.
+
+    `analisis_sensibilidad` usa L-BFGS-B, que aproxima el gradiente por
+    diferencias finitas sobre una utilidad que `quad` contamina con ruido de
+    orden 1e-10. `curva_teorica_spread` usa `brentq`, una biseccion sobre el
+    cambio de signo de la CPO que no toca gradientes ni llama al optimizador.
+
+    No comparten fuente de error, asi que coincidir no es tautologico: es la
+    verificacion que pide el enunciado (3.5) al comparar el resultado numerico
+    contra la prediccion teorica. Si alguien rompiera la funcion objetivo, las
+    dos curvas se separarian y esta prueba lo diria.
+    """
+    df_numerico = analisis_sensibilidad(valores_pi=(0.1, 0.4, 0.7))
+    df_teorico = curva_teorica_spread(df_numerico["pi_i"].to_numpy())
+
+    assert list(df_teorico.columns) == [
+        "pi_i", "medio_spread_ask", "medio_spread_bid", "spread",
+    ]
+
+    for spread_numerico, spread_teorico in zip(
+        df_numerico["spread"], df_teorico["spread"]
+    ):
+        assert spread_numerico == pytest.approx(spread_teorico, abs=1e-4)
+
+
+def test_la_curva_teorica_arranca_en_el_monopolista_y_crece():
+    """Con pi_i = 0 la CPO da 3.125 por lado; de ahi solo puede subir.
+
+    Es la prediccion cualitativa del modelo con el numero al lado: el spread
+    tiene un piso que no depende de la informacion asimetrica, y todo lo que
+    esta por encima es prima de seleccion adversa. La figura de sensibilidad
+    dibuja exactamente esta afirmacion.
+    """
+    curva = curva_teorica_spread(np.linspace(0.0, 0.9, 10))
+
+    assert curva.loc[0, "medio_spread_ask"] == pytest.approx(ALPHA / (2 * BETA), abs=1e-9)
+    assert curva.loc[0, "spread"] == pytest.approx(ALPHA / BETA, abs=1e-9)
+
+    assert curva["spread"].is_monotonic_increasing
+    assert (curva["spread"] >= ALPHA / BETA - 1e-9).all()
+
+    # Y nunca se sale del rango donde prob_ejecucion es positiva y la CPO vale.
+    assert (curva["medio_spread_ask"] <= ALPHA / BETA).all()
+    assert (curva["medio_spread_bid"] <= ALPHA / BETA).all()
