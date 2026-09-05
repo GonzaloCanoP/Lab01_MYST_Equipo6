@@ -302,3 +302,82 @@ def analisis_sensibilidad(valores_pi=(0.1, 0.4, 0.7)):
     return pd.DataFrame(filas)[
         ["pi_i", "bid", "ask", "spread", "utilidad_esperada", "convergio"]
     ]
+
+
+def prediccion_teorica_spread(pi_i=PI_I):
+    """Medio spread optimo predicho por la condicion de primer orden (CPO).
+
+    Es la "prediccion teorica" que pide el enunciado (3.5) para contrastar
+    contra el resultado numerico del analisis de sensibilidad. Es la misma CPO
+    de la sesion de Copeland-Galai del curso, que en su ejemplo discreto se
+    escribe `pi_L*(0.5 - 0.1*d) + pi_I*(0.10) = 0`; aqui se usa la version
+    general del modelo continuo.
+
+    Derivacion. Con a = A - S0, la utilidad esperada es
+
+        Pi = pi_L*[(ALPHA - BETA*a)*a + ...] - pi_I*[int_A^inf (P-A) f(P) dP + ...]
+
+    Derivando respecto de A, y usando que d/dA int_A^inf (P-A) f(P) dP = -(1-F(A)):
+
+        dPi/dA = pi_L*(ALPHA - 2*BETA*a) + pi_I*(1 - F(A)) = 0
+
+    que se despeja como
+
+        a* = ALPHA/(2*BETA) + (pi_I/pi_L) * (1 - F(A*)) / (2*BETA)
+             |_____________|   |_______________________________|
+              monopolista            prima de seleccion adversa
+
+    El primer termino es el medio spread del monopolista sin informados, 3.125
+    con los parametros del caso base, y es exactamente lo que verifica la prueba
+    obligatoria con pi_i = 0. El segundo es lo que hay que cobrar de mas para
+    financiar la opcion que se le regala al informado, y crece con pi_i por dos
+    vias: el cociente pi_I/pi_L y, en menor medida, la cola de la Erlang.
+
+    Analogo del lado del bid, con b = S0 - B:
+
+        b* = ALPHA/(2*BETA) + (pi_I/pi_L) * F(B*) / (2*BETA)
+
+    OJO: es una identidad IMPLICITA, no una formula cerrada. El lado derecho
+    depende de A*, que es justo lo que se quiere despejar. En el ejemplo de
+    clase (1 - F(A)) es una constante de 0.10 porque la distribucion es discreta
+    y el optimo no cambia de estado, y por eso ahi si sale una formula cerrada,
+    d* = 5 + pi_I/pi_L. Con la Erlang continua no hay tal cosa. Por eso esta
+    funcion evalua la identidad EN el optimo numerico: sirve para verificar que
+    el optimizador encontro un punto estacionario del problema correcto, no para
+    reemplazarlo.
+
+    Devuelve un dict con el medio spread de cada lado, su descomposicion en
+    monopolista mas prima, y el residuo de la CPO (que debe ser ~0 en el optimo).
+    """
+    pi_l = 1.0 - pi_i
+    if pi_l <= 0.0:
+        raise ValueError(
+            "La CPO no esta definida con pi_i = 1: sin traders de liquidez no "
+            "hay ingreso que compensar y el problema deja de tener interior."
+        )
+
+    resultado = optimizar_cotizaciones(pi_i=pi_i)
+    dist = distribucion_valor()
+
+    medio_spread_monopolista = ALPHA / (2 * BETA)
+
+    prima_ask = (pi_i / pi_l) * dist.sf(resultado["ask"]) / (2 * BETA)
+    prima_bid = (pi_i / pi_l) * dist.cdf(resultado["bid"]) / (2 * BETA)
+
+    a_optimo = resultado["ask"] - S0
+    b_optimo = S0 - resultado["bid"]
+
+    return {
+        "pi_i": pi_i,
+        "monopolista": medio_spread_monopolista,
+        "medio_spread_ask": a_optimo,
+        "medio_spread_bid": b_optimo,
+        "prima_ask": float(prima_ask),
+        "prima_bid": float(prima_bid),
+        "teorico_ask": medio_spread_monopolista + float(prima_ask),
+        "teorico_bid": medio_spread_monopolista + float(prima_bid),
+        "residuo_ask": abs(a_optimo - medio_spread_monopolista - float(prima_ask)),
+        "residuo_bid": abs(b_optimo - medio_spread_monopolista - float(prima_bid)),
+        "spread_teorico": 2 * medio_spread_monopolista + float(prima_ask) + float(prima_bid),
+        "spread_numerico": resultado["spread"],
+    }
